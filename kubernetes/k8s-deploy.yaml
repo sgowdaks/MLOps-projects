@@ -1,0 +1,179 @@
+# =============================================================================
+# k8s-deploy.yaml
+# Full Kubernetes deployment for the distributed sentiment-analysis stack.
+#
+# Components:
+#   1. Redis  — message broker & result backend
+#   2. API    — FastAPI producer pods (2 replicas)
+#   3. Worker — Celery ML consumer pods (2 replicas)
+#
+# Usage:
+#   kubectl apply -f k8s-deploy.yaml
+#   kubectl get pods
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1.  Redis Deployment
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:6-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+
+---
+# ---------------------------------------------------------------------------
+# 1b. Redis Service (internal DNS: redis-service:6379)
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+
+---
+# ---------------------------------------------------------------------------
+# 2.  API Deployment  (FastAPI, 2 replicas)
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deployment
+  labels:
+    app: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          # Replace with your actual image, e.g.:
+          #   docker build -t your-username/sentiment-app:latest .
+          #   docker push your-username/sentiment-app:latest
+          image: your-username/sentiment-app:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          # Liveness probe: restart the pod if it stops responding
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          # Readiness probe: only send traffic once the pod is ready
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+# ---------------------------------------------------------------------------
+# 2b. API Service  (LoadBalancer — external traffic → port 80)
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+
+---
+# ---------------------------------------------------------------------------
+# 3.  Worker Deployment  (Celery + HuggingFace model, 2 replicas)
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deployment
+  labels:
+    app: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: your-username/sentiment-app:latest
+          imagePullPolicy: Always
+          command: ["celery", "-A", "worker", "worker", "--loglevel=info", "--concurrency=2"]
+          resources:
+            # Workers carry the ML model in memory — give them more RAM
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          # Workers have no HTTP server, so we check they're alive via a
+          # Celery inspect ping instead.
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - worker
+                - inspect
+                - ping
+                - -d
+                - "celery@$HOSTNAME"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
