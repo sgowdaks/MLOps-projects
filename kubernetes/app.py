@@ -1,41 +1,63 @@
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
-from worker import sentiment_task
+from celery import Celery
 
-app = FastAPI(title="Sentiment Analysis API", version="1.0.0")
+# Client-only Celery instance — connects to Redis to send/check tasks.
+# It does NOT import worker.py, so the ML model is never loaded here.
+celery_client = Celery(
+    broker="redis://redis-service:6379/0",
+    backend="redis://redis-service:6379/0",
+)
+
+app = FastAPI(title="Sentiment Analysis API")
 
 
-class SingleText(BaseModel):
-    text: str
-
-
+# The request body shape: a list of texts to analyse
 class BatchText(BaseModel):
-    texts: List[str]
+    texts: list[str]
 
 
+# ── Health check ────────────────────────────────────────────────────────────
 @app.get("/")
 def health_check():
-    return {"status": "online", "mode": "distributed", "broker": "redis"}
+    return {"status": "online"}
 
 
+# ── Option A: fire-and-forget (good for large batches) ──────────────────────
+# Sends the job to Redis and returns a task_id straight away.
+# The client can check progress with GET /result/{task_id}.
 @app.post("/predict")
-async def predict_batch(data: BatchText):
-    """Enqueues a batch of texts for sentiment analysis. Returns immediately."""
+async def predict_async(data: BatchText):
     if not data.texts:
         raise HTTPException(status_code=422, detail="texts list must not be empty")
-    task = sentiment_task.delay(data.texts)
-    return {"task_id": task.id, "status": "Pending", "item_count": len(data.texts)}
+    # send_task references the task by name — worker.py is never imported here
+    task = celery_client.send_task("global_sentiment_task", args=[data.texts])
+    return {"task_id": task.id, "status": "Pending"}
 
 
+# ── Option B: wait for result (good for small/interactive requests) ──────────
+# Sends the job to Redis, then waits for the worker to finish and returns
+# the result directly — all in one request.
+# asyncio.to_thread keeps the server free to handle other requests while waiting.
+@app.post("/predict/sync")
+async def predict_sync(data: BatchText):
+    if not data.texts:
+        raise HTTPException(status_code=422, detail="texts list must not be empty")
+    task = celery_client.send_task("global_sentiment_task", args=[data.texts])
+    try:
+        result = await asyncio.to_thread(task.get, timeout=30)
+    except Exception as exc:
+        raise HTTPException(status_code=504, detail=str(exc))
+    return {"result": result}
+
+
+# ── Check the status/result of an async job ──────────────────────────────────
 @app.get("/result/{task_id}")
 async def get_result(task_id: str):
-    """Poll this endpoint with the task_id to retrieve the result."""
-    task = sentiment_task.AsyncResult(task_id)
-    if task.state == "PENDING":
-        return {"task_id": task_id, "status": "Pending"}
-    elif task.state == "SUCCESS":
-        return {"task_id": task_id, "status": "Success", "result": task.result}
-    elif task.state == "FAILURE":
-        return {"task_id": task_id, "status": "Failed", "error": str(task.info)}
-    return {"task_id": task_id, "status": task.state}
+    task = celery_client.AsyncResult(task_id)
+    if task.state == "SUCCESS":
+        return {"status": "Success", "result": task.result}
+    if task.state == "FAILURE":
+        return {"status": "Failed", "error": str(task.info)}
+    return {"status": task.state}  # PENDING, STARTED, RETRY, etc.

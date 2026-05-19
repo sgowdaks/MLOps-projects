@@ -1,3 +1,9 @@
+import os
+# Force underlying libraries to run single-threaded to avoid deadlocks in containers
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 from celery import Celery
 from typing import List
 
@@ -28,7 +34,7 @@ model = pipeline(
 print("Model loaded successfully.")
 
 
-@celery_app.task(name="sentiment_task", bind=True, max_retries=3)
+@celery_app.task(name="global_sentiment_task", bind=True, max_retries=3)
 def sentiment_task(self, texts: List[str]):
     """Runs sentiment analysis on a batch of texts and returns the results."""
     try:

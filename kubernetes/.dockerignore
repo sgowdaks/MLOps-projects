@@ -1,0 +1,23 @@
+# Kubernetes binaries (not needed inside the image)
+kubectl
+minikube-linux-amd64
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.DS_Store
+.env
+*.log

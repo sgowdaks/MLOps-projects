@@ -85,32 +85,32 @@ spec:
           # Replace with your actual image, e.g.:
           #   docker build -t your-username/sentiment-app:latest .
           #   docker push your-username/sentiment-app:latest
-          image: your-username/sentiment-app:latest
-          imagePullPolicy: Always
+          image: shivani/sentiment-app:v7
+          imagePullPolicy: IfNotPresent
           command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
-          ports:
+          ports: 
             - containerPort: 8000
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "500m"
           # Liveness probe: restart the pod if it stops responding
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 15
-          # Readiness probe: only send traffic once the pod is ready
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
+          # livenessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 8000
+          #   initialDelaySeconds: 10
+          #   periodSeconds: 15
+          # # Readiness probe: only send traffic once the pod is ready
+          # readinessProbe:
+          #   httpGet:
+          #     path: /
+          #     port: 8000
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
 
 ---
 # ---------------------------------------------------------------------------
@@ -151,29 +151,29 @@ spec:
     spec:
       containers:
         - name: worker
-          image: your-username/sentiment-app:latest
-          imagePullPolicy: Always
-          command: ["celery", "-A", "worker", "worker", "--loglevel=info", "--concurrency=2"]
+          image: shivani/sentiment-app:v7
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "worker", "worker", "--loglevel=info", "--pool=prefork", "--concurrency=1"]
           resources:
             # Workers carry the ML model in memory — give them more RAM
             requests:
-              memory: "1Gi"
-              cpu: "500m"
-            limits:
               memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
               cpu: "1000m"
           # Workers have no HTTP server, so we check they're alive via a
           # Celery inspect ping instead.
-          livenessProbe:
-            exec:
-              command:
-                - celery
-                - -A
-                - worker
-                - inspect
-                - ping
-                - -d
-                - "celery@$HOSTNAME"
-            initialDelaySeconds: 30
-            periodSeconds: 60
-            timeoutSeconds: 10
+          # livenessProbe:
+          #   exec:
+          #     command:
+          #       - celery
+          #       - -A
+          #       - worker
+          #       - inspect
+          #       - ping
+          #       - -d
+          #       - "celery@$HOSTNAME"
+          #   initialDelaySeconds: 30
+          #   periodSeconds: 60
+          #   timeoutSeconds: 10
