@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-model-service
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true" # <-- This makes it private
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: ml-model-api

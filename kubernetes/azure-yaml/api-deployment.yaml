@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-model-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-model
+  template:
+    metadata:
+      labels:
+        app: ml-model
+    spec:
+      containers:
+      - name: ml-model-api
+        image: mymlopsregistry.azurecr.io/ml-model-api:v1
+        # OVERRIDE THE COMMAND TO USE app.py:
+        command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+        env:
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service:6379/0"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://redis-service:6379/0"
+        - name: PYTHONUNBUFFERED
+          value: "1"

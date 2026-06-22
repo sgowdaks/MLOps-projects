@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      containers:
+      - name: celery-worker
+        image: mymlopsregistry.azurecr.io/ml-model-api:v1 # Or v2 depending on what you pushed
+        # CHANGE THIS LINE TO MATCH YOUR worker.py FILE:
+        command: ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info"] 
+        env:
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service:6379/0"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://redis-service:6379/0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
